@@ -9,11 +9,13 @@ $(GIT_HOOKS):
 
 include common.mk
 
+
 CFLAGS = -I./src
 CFLAGS += -O2
 CFLAGS += -std=gnu99 -Wall -W
 CFLAGS += -DUNUSED="__attribute__((unused))"
 CFLAGS += -DNDEBUG
+LDFLAGS_user = -lpthread
 LDFLAGS =
 
 # standard build rules
@@ -33,6 +35,9 @@ deps += $(OBJS:%.o=%.o.d)
 $(TARGET): $(OBJS)
 	$(VECHO) "  LD\t$@\n"
 	$(Q)$(CC) -o $@ $^ $(LDFLAGS)
+
+htstress: htstress.c
+	$(CC) $(CFLAGS_user) -o $@ $< $(LDFLAGS_user)
 
 check: all
 	@scripts/test.sh
