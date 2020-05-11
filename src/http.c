@@ -287,6 +287,7 @@ void do_request(void *ptr)
             continue;
         }
 
+        /* last time file be modified */
         out->mtime = sbuf.st_mtime;
 
         http_handle_header(r, out);

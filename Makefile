@@ -1,5 +1,5 @@
 .PHONY: all check clean
-TARGET = sehttpd
+TARGET = sehttpd# htstress
 GIT_HOOKS := .git/hooks/applied
 all: $(GIT_HOOKS) $(TARGET)
 
@@ -15,6 +15,7 @@ CFLAGS += -O2
 CFLAGS += -std=gnu99 -Wall -W
 CFLAGS += -DUNUSED="__attribute__((unused))"
 CFLAGS += -DNDEBUG
+#CFLAGS += -fsanitize=thread
 LDFLAGS_user = -lpthread
 LDFLAGS =
 
@@ -38,6 +39,10 @@ $(TARGET): $(OBJS)
 
 htstress: htstress.c
 	$(CC) $(CFLAGS_user) -o $@ $< $(LDFLAGS_user)
+
+# usage: make visual DEST="*.out"
+visual:
+	@scripts/plot.sh $(DEST)
 
 check: all
 	@scripts/test.sh

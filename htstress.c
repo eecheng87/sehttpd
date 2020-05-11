@@ -299,8 +299,8 @@ static void *worker(void *arg)
                         return NULL;
                     }
 
-                    if (ticks && m % ticks == 0)
-                        printf("%d requests\n", m);
+                    // if (ticks && m % ticks == 0)
+                    //  printf("%d requests\n", m);
 
                     init_conn(efd, ec);
                 }
@@ -512,26 +512,7 @@ int main(int argc, char *argv[])
     double delta =
         tve.tv_sec - tv.tv_sec + ((double) (tve.tv_usec - tv.tv_usec)) / 1e6;
 
-    printf(
-        "\n"
-        "requests:      %" PRIu64
-        "\n"
-        "good requests: %" PRIu64
-        " [%d%%]\n"
-        "bad requests:  %" PRIu64
-        " [%d%%]\n"
-        "socker errors: %" PRIu64
-        " [%d%%]\n"
-        "seconds:       %.3f\n"
-        "requests/sec:  %.3f\n"
-        "\n",
-        num_requests, good_requests,
-        (int) (num_requests ? good_requests * 100 / num_requests : 0),
-        bad_requests,
-        (int) (num_requests ? bad_requests * 100 / num_requests : 0),
-        socket_errors,
-        (int) (num_requests ? socket_errors * 100 / num_requests : 0), delta,
-        delta > 0 ? max_requests / delta : 0);
+    printf("%.3f\n", delta > 0 ? max_requests / delta : 0);
 
     return 0;
 }
