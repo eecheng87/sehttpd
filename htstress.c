@@ -512,7 +512,7 @@ int main(int argc, char *argv[])
     double delta =
         tve.tv_sec - tv.tv_sec + ((double) (tve.tv_usec - tv.tv_usec)) / 1e6;
 
-    printf("%.3f\n", delta > 0 ? max_requests / delta : 0);
+    printf(" %.3f\n", delta > 0 ? max_requests / delta : 0);
 
     return 0;
 }

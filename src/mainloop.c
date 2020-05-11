@@ -1,6 +1,7 @@
 #include <arpa/inet.h>
 #include <assert.h>
 #include <fcntl.h>
+#include <pthread.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -11,8 +12,8 @@
 
 #include "http.h"
 #include "logger.h"
+#include "threadpool.h"
 #include "timer.h"
-
 /* the length of the struct epoll_events array pointed to by *events */
 #define MAXEVENTS 1024
 
@@ -73,8 +74,16 @@ static int sock_set_non_blocking(int fd)
 #define PORT 8081
 #define WEBROOT "./www"
 
+/* Global variable */
+threadpool_t *pool;
+pthread_mutex_t pool_lock;
+
+
 int main()
 {
+    /* Initialize thread pool */
+    /*threadpool_create(THREAD_NUM, QUEUE_SIZE, 0) */
+    pool = threadpool_create(16, 256);
     /* when a fd is closed by remote, writing to this fd will cause system
      * send SIGPIPE to this process, which exit the program
      */
@@ -159,8 +168,10 @@ int main()
                     close(fd);
                     continue;
                 }
-
-                do_request(events[i].data.ptr);
+                // do_request(events[i].data.ptr);
+                if (threadpool_add(pool, do_request, events[i].data.ptr) < 0) {
+                    printf("Error occur when adding task in queue\n");
+                }
             }
         }
     }
