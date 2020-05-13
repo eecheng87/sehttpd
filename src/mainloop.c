@@ -82,7 +82,7 @@ int main()
 {
     /* Initialize thread pool */
     /*threadpool_create(THREAD_NUM, QUEUE_SIZE, 0) */
-    pool = threadpool_create(16, 256);
+    pool = threadpool_create(16, 16);
     /* when a fd is closed by remote, writing to this fd will cause system
      * send SIGPIPE to this process, which exit the program
      */

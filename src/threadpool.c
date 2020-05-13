@@ -1,4 +1,5 @@
 #include "threadpool.h"
+
 #include <assert.h>
 #include <pthread.h>
 #include <stdio.h>
@@ -131,8 +132,22 @@ void *threadpool_thread(void *arg)
         Desperately consume task in
         queue belong this thread
     */
+    // threadpool_thread_t *thread = (threadpool_thread_t *) arg;
+
     threadpool_thread_t *thread = (threadpool_thread_t *) arg;
 
+/* Scheme 1 */
+#if 0
+    while (1) {
+        threadpool_task_t *next_task = threadpool_qpop(thread);
+        while(next_task){
+            (next_task->function)(next_task->argument);
+            next_task = threadpool_qpop(thread);
+        }
+        sched_yield();
+    }
+#endif
+    /* Scheme 2 */
     for (;;) {
         /* Grab task from queue belong this thread */
         threadpool_task_t *next_task = threadpool_qpop(thread);
@@ -140,6 +155,9 @@ void *threadpool_thread(void *arg)
         if (next_task) {
             (next_task->function)(next_task->argument);
         }
+        /* Performance improvement */
+        /* Improve 5k requests     */
+        sched_yield();
     }
 }
 
@@ -205,7 +223,7 @@ threadpool_task_t *threadpool_qpop(threadpool_thread_t *dest)
         /* check whether empty */
         int p = dest->pop_index;
         if (__sync_bool_compare_and_swap(&(dest->task_count), 0, 0)) {
-            printf("Queue is empty\n");
+            // printf("Queue is empty\n");
             return NULL;
         }
         dest->pop_index = (p + 1) % dest->size;

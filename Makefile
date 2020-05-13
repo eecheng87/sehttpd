@@ -16,6 +16,8 @@ CFLAGS += -std=gnu99 -Wall -W
 CFLAGS += -DUNUSED="__attribute__((unused))"
 CFLAGS += -DNDEBUG
 #CFLAGS += -fsanitize=thread
+LDFLAGS += -fsanitize=thread
+#CFLAGS += -fsanitize=thread
 LDFLAGS_user = -lpthread
 LDFLAGS = -lpthread
 
@@ -41,7 +43,7 @@ $(TARGET): $(OBJS)
 htstress: htstress.c
 	$(CC) $(CFLAGS_user) -o $@ $< $(LDFLAGS_user)
 
-# usage: make visual DEST="experiment/*.out""
+# usage: make visual DEST="experiment/*.out"
 visual:
 	@scripts/plot.sh $(DEST)
 
