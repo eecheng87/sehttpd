@@ -76,7 +76,6 @@ static int sock_set_non_blocking(int fd)
 
 /* Global variable */
 threadpool_t *pool;
-pthread_mutex_t pool_lock;
 
 
 int main()
@@ -168,8 +167,8 @@ int main()
                     close(fd);
                     continue;
                 }
-                // do_request(events[i].data.ptr);
-                if (threadpool_add(pool, do_request, events[i].data.ptr) < 0) {
+                if (threadpool_qpush(pool, do_request, events[i].data.ptr) <
+                    0) {
                     printf("Error occur when adding task in queue\n");
                 }
             }

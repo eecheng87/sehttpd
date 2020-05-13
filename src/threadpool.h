@@ -32,7 +32,8 @@
 #define MAX_QUEUE 65536
 
 typedef struct threadpool_t threadpool_t;
-
+typedef struct threadpool_thread_t threadpool_thread_t;
+typedef struct threadpool_task_t threadpool_task_t;
 typedef enum {
     threadpool_invalid = -1,
     threadpool_lock_failure = -2,
@@ -54,8 +55,18 @@ int threadpool_add(threadpool_t *pool, void (*routine)(void *), void *arg);
 
 int threadpool_destroy(threadpool_t *pool);
 
-void *threadpool_thread(void *threadpool);
+
 
 int threadpool_free(threadpool_t *pool);
 
+threadpool_thread_t *round_robin_schedule(threadpool_t *pool);
+
+/* consumer */
+void *threadpool_thread(void *arg);
+
+/* producer */
+int threadpool_qpush(threadpool_t *pool, void (*task)(void *), void *arg);
+int dispatch(threadpool_thread_t *dest, void (*task)(void *), void *arg);
+
+threadpool_task_t *threadpool_qpop(threadpool_thread_t *dest);
 #endif /* _THREADPOOL_H_ */

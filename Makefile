@@ -41,7 +41,7 @@ $(TARGET): $(OBJS)
 htstress: htstress.c
 	$(CC) $(CFLAGS_user) -o $@ $< $(LDFLAGS_user)
 
-# usage: make visual DEST="*.out"
+# usage: make visual DEST="experiment/*.out""
 visual:
 	@scripts/plot.sh $(DEST)
 

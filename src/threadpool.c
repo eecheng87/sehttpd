@@ -1,25 +1,35 @@
 #include "threadpool.h"
+#include <assert.h>
 #include <pthread.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
-typedef struct {
+/* entry in work queue */
+struct threadpool_task_t {
     void (*function)(void *);
     void *argument;
-} threadpool_task_t;
+};
+
+/* pack real thread `pthread_t` */
+/*
+    `pop_index` and `push_index` are
+    both gaurantee contention-free.
+*/
+struct threadpool_thread_t {
+    pthread_t thread;         /* real POSIX thread              */
+    threadpool_task_t *queue; /* work queue belong each thread  */
+    int size;                 /* size of queue                  */
+    int pop_index;            /* next index for pop             */
+    int push_index;           /* next index for push            */
+    int task_count;           /* shared var between enq and deq */
+};
 
 struct threadpool_t {
-    pthread_mutex_t lock;
-    pthread_cond_t notify;    /* CV for notify worker threads */
-    pthread_t *threads;       /* threads set ( array )        */
-    threadpool_task_t *queue; /* array                        */
+    threadpool_thread_t *threads; /* threads set ( array )     */
     int thread_count;
-    int queue_size;
-    int head;     /* index of first element       */
-    int tail;     /* index of last element        */
-    int count;    /* num of task                  */
-    int shutdown; /* flag                         */
-    int started;  /* num of threads are working   */
+    int shutdown; /* flag                      */
 };
+
 threadpool_t *threadpool_create(int thread_count, int queue_size)
 {
     threadpool_t *pool;
@@ -35,31 +45,30 @@ threadpool_t *threadpool_create(int thread_count, int queue_size)
 
     /* Initialize */
     pool->thread_count = 0;
-    pool->queue_size = queue_size;
-    pool->head = pool->tail = pool->count = 0;
-    pool->shutdown = pool->started = 0;
+    pool->shutdown = 0;
 
     /* Allocate thread and task queue */
-    pool->threads = (pthread_t *) malloc(sizeof(pthread_t) * thread_count);
-    pool->queue =
-        (threadpool_task_t *) malloc(sizeof(threadpool_task_t) * queue_size);
+    pool->threads = (threadpool_thread_t *) malloc(sizeof(threadpool_thread_t) *
+                                                   thread_count);
 
-    /* Initialize mutex and conditional variable first */
-    if ((pthread_mutex_init(&(pool->lock), NULL) != 0) ||
-        (pthread_cond_init(&(pool->notify), NULL) != 0) ||
-        (pool->threads == NULL) || (pool->queue == NULL)) {
+    if (!pool->threads) {
         goto err;
     }
 
     /* Start worker threads */
     for (int i = 0; i < thread_count; i++) {
-        if (pthread_create(&(pool->threads[i]), NULL, threadpool_thread,
-                           (void *) pool) != 0) {
+        if (pthread_create(&(pool->threads[i].thread), NULL, threadpool_thread,
+                           (void *) (pool->threads + i)) != 0) {
             threadpool_destroy(pool);
             return NULL;
         }
+        /* Initialize thread_t's member */
+        pool->threads[i].queue = (threadpool_task_t *) malloc(
+            sizeof(threadpool_task_t) * queue_size);
         pool->thread_count++;
-        pool->started++;
+        pool->threads[i].pop_index = pool->threads[i].push_index = 0;
+        pool->threads[i].task_count = 0;
+        pool->threads[i].size = queue_size;
     }
 
     return pool;
@@ -71,56 +80,6 @@ err:
     return NULL;
 }
 
-int threadpool_add(threadpool_t *pool, void (*function)(void *), void *argument)
-{
-    int err = 0;
-    int next;
-
-    if (pool == NULL || function == NULL) {
-        return threadpool_invalid;
-    }
-
-    /* Acquire lock */
-    if (pthread_mutex_lock(&(pool->lock)) != 0) {
-        return threadpool_lock_failure;
-    }
-
-    next = (pool->tail + 1) % pool->queue_size;
-
-    do {
-        /* Queue size checking */
-        if (pool->count == pool->queue_size) {
-            err = threadpool_queue_full;
-            break;
-        }
-
-        /* Shutdown checking */
-        if (pool->shutdown) {
-            err = threadpool_shutdown;
-            break;
-        }
-
-        /* Add task to queue */
-        pool->queue[pool->tail].function = function;
-        pool->queue[pool->tail].argument = argument;
-        pool->tail = next;
-        pool->count += 1;
-
-        /* Notify *_wait */
-        if (pthread_cond_signal(&(pool->notify)) != 0) {
-            err = threadpool_lock_failure;
-            break;
-        }
-    } while (0);
-
-    /* Release lock */
-    if (pthread_mutex_unlock(&pool->lock) != 0) {
-        err = threadpool_lock_failure;
-    }
-
-    return err;
-}
-
 int threadpool_destroy(threadpool_t *pool)
 {
     int i, err = 0;
@@ -128,11 +87,6 @@ int threadpool_destroy(threadpool_t *pool)
     if (pool == NULL) {
         return threadpool_invalid;
     }
-
-    if (pthread_mutex_lock(&(pool->lock)) != 0) {
-        return threadpool_lock_failure;
-    }
-
     do {
         /* Already shutting down */
         if (pool->shutdown) {
@@ -140,19 +94,9 @@ int threadpool_destroy(threadpool_t *pool)
             break;
         }
 
-        pool->shutdown =
-            threadpool_graceful ? graceful_shutdown : immediate_shutdown;
-
-        /* Wake up all worker threads */
-        if ((pthread_cond_broadcast(&(pool->notify)) != 0) ||
-            (pthread_mutex_unlock(&(pool->lock)) != 0)) {
-            err = threadpool_lock_failure;
-            break;
-        }
-
         /* Join all worker thread */
         for (i = 0; i < pool->thread_count; i++) {
-            if (pthread_join(pool->threads[i], NULL) != 0) {
+            if (pthread_join(pool->threads[i].thread, NULL) != 0) {
                 err = threadpool_thread_failure;
             }
         }
@@ -167,63 +111,108 @@ int threadpool_destroy(threadpool_t *pool)
 
 int threadpool_free(threadpool_t *pool)
 {
-    if (pool == NULL || pool->started > 0) {
+    if (pool == NULL) {
         return -1;
     }
 
     if (pool->threads) {
         free(pool->threads);
-        free(pool->queue);
-
-        /* Because we allocate pool->threads after initializing the
-           mutex and condition variable, we're sure they're
-           initialized. Let's lock the mutex just in case. */
-        pthread_mutex_lock(&(pool->lock));
-        pthread_mutex_destroy(&(pool->lock));
-        pthread_cond_destroy(&(pool->notify));
     }
     free(pool);
     return 0;
 }
 
 
-void *threadpool_thread(void *threadpool)
+void *threadpool_thread(void *arg)
 {
-    /* Worker: Choose task in queue of pool */
-    threadpool_t *pool = (threadpool_t *) threadpool;
-    threadpool_task_t task;
+    /* thread default routine */
+    /*
+        Choose task in queue of pool
+        Desperately consume task in
+        queue belong this thread
+    */
+    threadpool_thread_t *thread = (threadpool_thread_t *) arg;
 
     for (;;) {
-        /* Lock must be taken to wait on conditional variable */
-        pthread_mutex_lock(&(pool->lock));
-
-        /* Wait on condition variable, check for spurious wakeups.
-           When returning from pthread_cond_wait(), we own the lock. */
-        while ((pool->count == 0) && (!pool->shutdown)) {
-            pthread_cond_wait(&(pool->notify), &(pool->lock));
-        }
-
-        if ((pool->shutdown == immediate_shutdown) ||
-            ((pool->shutdown == graceful_shutdown) && (pool->count == 0))) {
-            break;
-        }
-
-        /* Grab our task */
-        task.function = pool->queue[pool->head].function;
-        task.argument = pool->queue[pool->head].argument;
-        pool->head = (pool->head + 1) % pool->queue_size;
-        pool->count -= 1;
-
-        /* Unlock */
-        pthread_mutex_unlock(&(pool->lock));
-
+        /* Grab task from queue belong this thread */
+        threadpool_task_t *next_task = threadpool_qpop(thread);
         /* Call worker */
-        (*(task.function))(task.argument);
+        if (next_task) {
+            (next_task->function)(next_task->argument);
+        }
     }
+}
 
-    pool->started--;
+threadpool_thread_t *round_robin_schedule(threadpool_t *pool)
+{
+    /*
+        cur_index is shared variable
+        and only initialize one time
+    */
+    static int cur_index = -1;
+    assert(pool && pool->thread_count > 0);
+    cur_index = (cur_index + 1) % pool->thread_count;
+    return &(pool->threads[cur_index]);
+}
 
-    pthread_mutex_unlock(&(pool->lock));
-    pthread_exit(NULL);
-    return (NULL);
+int threadpool_qpush(threadpool_t *pool, void (*task)(void *), void *arg)
+{
+    /*
+        decide proper queue to insert and
+        push task into queue of thread
+    */
+    threadpool_thread_t *dest = round_robin_schedule(pool);
+    return dispatch(dest, task, arg);
+}
+
+int dispatch(threadpool_thread_t *dest, void (*task)(void *), void *arg)
+{
+    /*
+        lock-free enqueue
+        work as producer
+    */
+    do {
+        /* There isn't contention in push_index */
+        int p = dest->push_index;
+
+        /* check whether full */
+        if (__sync_bool_compare_and_swap(&(dest->task_count), dest->size,
+                                         dest->size)) {
+            printf("Queue is full\n");
+            return -1;
+        }
+        /* insert task into queue */
+        dest->queue[dest->push_index].function = task;
+        dest->queue[dest->push_index].argument = arg;
+        dest->push_index = (p + 1) % dest->size;
+
+        /* task_count is shared variable for qpop and qpush */
+        __sync_fetch_and_add(&(dest->task_count), 1);
+        break;
+
+    } while (1);
+    return 0;
+}
+
+threadpool_task_t *threadpool_qpop(threadpool_thread_t *dest)
+{
+    /*
+        lock-free dequeue
+        work as consumer
+    */
+    do {
+        /* There isn't contention in pop_index */
+        /* check whether empty */
+        int p = dest->pop_index;
+        if (__sync_bool_compare_and_swap(&(dest->task_count), 0, 0)) {
+            printf("Queue is empty\n");
+            return NULL;
+        }
+        dest->pop_index = (p + 1) % dest->size;
+        /* task_count is shared variable for qpop and qpush */
+        __sync_fetch_and_sub(&(dest->task_count), 1);
+        return dest->queue + p;
+
+    } while (1);
+    return NULL;
 }
